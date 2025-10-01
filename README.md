@@ -2,6 +2,11 @@
 
 A powerful Python script to retrieve, filter, and visualize tasks from GitHub Projects (V2) using GitHub's GraphQL API.
 
+## 🆕 NEW: MCP Server Available!
+
+This project now includes a **Model Context Protocol (MCP) server** that can be used with Claude Desktop and other MCP-compatible clients! 
+
+**→ See [mcp/README.md](mcp/README.md) for complete MCP server documentation.**
 ## Features
 
 - 📊 **Multiple Output Formats**: Display tasks as tables, trees, JSON, or grouped by status
@@ -10,6 +15,7 @@ A powerful Python script to retrieve, filter, and visualize tasks from GitHub Pr
 - 📋 **Task Management**: View issues, pull requests, and draft issues
 - 🔄 **Pagination Support**: Automatically handles large projects
 - 📝 **Detailed Information**: Access task descriptions, assignees, labels, and custom fields
+- 🤖 **MCP Server**: Use with Claude Desktop or other MCP clients for AI-powered project management
 
 ## Requirements
 
@@ -33,6 +39,17 @@ Or using a requirements file:
 ```bash
 pip install -r requirements.txt
 ```
+
+3. Set up your GitHub token (see [GitHub Token Setup](#github-token-setup) below):
+```bash
+# Copy the example environment file
+cp .env.example .env
+
+# Edit .env and add your GitHub token
+# GITHUB_TOKEN=your_github_token_here
+```
+
+**⚠️ Security Note**: Never commit your `.env` file or expose your GitHub token in code. The `.gitignore` file is configured to exclude `.env` automatically.
 
 ## Usage
 
