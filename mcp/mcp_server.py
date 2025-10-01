@@ -51,6 +51,11 @@ class GitHubProjectMCPServer:
                 env_path = script_dir / '.env'
                 if env_path.exists():
                     load_dotenv(env_path, override=True)
+                else:
+                    # Try parent directory of script (project root)
+                    env_path = script_dir.parent / '.env'
+                    if env_path.exists():
+                        load_dotenv(env_path, override=True)
         
         self.token = token or os.getenv('GITHUB_TOKEN')
         if not self.token:
@@ -73,8 +78,8 @@ class GitHubProjectMCPServer:
     
     def get_project_tasks_full(
         self,
-        org: str,
-        project_id: int,
+        org: str = None,
+        project_id: int = None,
         label: str = None,
         status: str = None,
         assignee: str = None,
@@ -84,7 +89,7 @@ class GitHubProjectMCPServer:
         Get all tasks from a GitHub project with optional filtering.
         
         Args:
-            org: GitHub organization name
+            org: GitHub organization name (uses GITHUB_ORG env var if not provided)
             project_id: GitHub project number
             label: Filter by label name (case-insensitive, optional)
             status: Filter by status field value (case-insensitive, optional)
@@ -96,6 +101,14 @@ class GitHubProjectMCPServer:
         """
         if not self.manager:
             self.initialize()
+        
+        # Get organization from argument or environment variable
+        org = org or os.getenv('GITHUB_ORG')
+        if not org:
+            raise ValueError("GitHub organization is required. Provide 'org' parameter or set GITHUB_ORG environment variable.")
+        
+        if not project_id:
+            raise ValueError("project_id is required.")
         
         # Get project information
         project_info = self.manager.get_project_by_number(org, project_id)
@@ -137,8 +150,8 @@ class GitHubProjectMCPServer:
     
     def get_child_tasks(
         self,
-        org: str,
-        project_id: int,
+        org: str = None,
+        project_id: int = None,
         task_id: str = None,
         task_number: int = None,
         label: str = None,
@@ -149,7 +162,7 @@ class GitHubProjectMCPServer:
         Get child tasks of a specific parent task.
         
         Args:
-            org: GitHub organization name
+            org: GitHub organization name (uses GITHUB_ORG env var if not provided)
             project_id: GitHub project number
             task_id: GitHub issue/task ID (optional, either this or task_number required)
             task_number: GitHub issue number (optional, either this or task_id required)
@@ -162,6 +175,14 @@ class GitHubProjectMCPServer:
         """
         if not self.manager:
             self.initialize()
+        
+        # Get organization from argument or environment variable
+        org = org or os.getenv('GITHUB_ORG')
+        if not org:
+            raise ValueError("GitHub organization is required. Provide 'org' parameter or set GITHUB_ORG environment variable.")
+        
+        if not project_id:
+            raise ValueError("project_id is required.")
         
         if not task_id and not task_number:
             raise ValueError("Either task_id or task_number must be provided")
@@ -221,8 +242,8 @@ class GitHubProjectMCPServer:
     
     def get_task_info(
         self,
-        org: str,
-        project_id: int,
+        org: str = None,
+        project_id: int = None,
         task_id: str = None,
         task_number: int = None
     ) -> Dict[str, Any]:
@@ -230,7 +251,7 @@ class GitHubProjectMCPServer:
         Get detailed information about a specific task.
         
         Args:
-            org: GitHub organization name
+            org: GitHub organization name (uses GITHUB_ORG env var if not provided)
             project_id: GitHub project number
             task_id: GitHub issue/task ID (optional, either this or task_number required)
             task_number: GitHub issue number (optional, either this or task_id required)
@@ -240,6 +261,14 @@ class GitHubProjectMCPServer:
         """
         if not self.manager:
             self.initialize()
+        
+        # Get organization from argument or environment variable
+        org = org or os.getenv('GITHUB_ORG')
+        if not org:
+            raise ValueError("GitHub organization is required. Provide 'org' parameter or set GITHUB_ORG environment variable.")
+        
+        if not project_id:
+            raise ValueError("project_id is required.")
         
         if not task_id and not task_number:
             raise ValueError("Either task_id or task_number must be provided")
@@ -295,7 +324,7 @@ def create_mcp_server():
                 "properties": {
                     "org": {
                         "type": "string",
-                        "description": "GitHub organization name (e.g., '4d')"
+                        "description": "GitHub organization name (e.g., '4d'). If not provided, uses GITHUB_ORG environment variable."
                     },
                     "project_id": {
                         "type": "integer",
@@ -319,7 +348,7 @@ def create_mcp_server():
                         "description": "Filter by item type (optional)"
                     }
                 },
-                "required": ["org", "project_id"]
+                "required": ["project_id"]
             }
         },
         {
@@ -330,7 +359,7 @@ def create_mcp_server():
                 "properties": {
                     "org": {
                         "type": "string",
-                        "description": "GitHub organization name (e.g., '4d')"
+                        "description": "GitHub organization name (e.g., '4d'). If not provided, uses GITHUB_ORG environment variable."
                     },
                     "project_id": {
                         "type": "integer",
@@ -357,7 +386,7 @@ def create_mcp_server():
                         "description": "Filter child tasks by assignee username (optional)"
                     }
                 },
-                "required": ["org", "project_id"]
+                "required": ["project_id"]
             }
         },
         {
@@ -368,7 +397,7 @@ def create_mcp_server():
                 "properties": {
                     "org": {
                         "type": "string",
-                        "description": "GitHub organization name (e.g., '4d')"
+                        "description": "GitHub organization name (e.g., '4d'). If not provided, uses GITHUB_ORG environment variable."
                     },
                     "project_id": {
                         "type": "integer",
@@ -383,7 +412,7 @@ def create_mcp_server():
                         "description": "GitHub issue number like #123 (optional, either this or task_id is required)"
                     }
                 },
-                "required": ["org", "project_id"]
+                "required": ["project_id"]
             }
         }
     ]
@@ -433,24 +462,50 @@ def main():
     # Check for GitHub token before starting the server
     # Try to load .env file if dotenv is available
     env_loaded = False
+    env_path = None
     if DOTENV_AVAILABLE:
+        # Debug: print search paths
+        print(f"🔍 Searching for .env file...", file=sys.stderr)
+        print(f"   Current working directory: {Path.cwd()}", file=sys.stderr)
+        print(f"   Script directory: {Path(__file__).parent}", file=sys.stderr)
+        print(f"   Parent directory: {Path(__file__).parent.parent}", file=sys.stderr)
+        
         env_path = Path.cwd() / '.env'
         if env_path.exists():
-            print(f"Loading .env from: {env_path}", file=sys.stderr)
+            print(f"✅ Loading .env from: {env_path}", file=sys.stderr)
             load_dotenv(env_path, override=True)
             env_loaded = True
         else:
+            print(f"   ❌ Not found: {env_path}", file=sys.stderr)
             script_dir = Path(__file__).parent
             env_path = script_dir / '.env'
             if env_path.exists():
-                print(f"Loading .env from: {env_path}", file=sys.stderr)
+                print(f"✅ Loading .env from: {env_path}", file=sys.stderr)
                 load_dotenv(env_path, override=True)
                 env_loaded = True
+            else:
+                print(f"   ❌ Not found: {env_path}", file=sys.stderr)
+                # Try parent directory of script (project root)
+                env_path = script_dir.parent / '.env'
+                if env_path.exists():
+                    print(f"✅ Loading .env from: {env_path}", file=sys.stderr)
+                    load_dotenv(env_path, override=True)
+                    env_loaded = True
+                else:
+                    print(f"   ❌ Not found: {env_path}", file=sys.stderr)
+    else:
+        print(f"⚠️  python-dotenv not available, relying on environment variables", file=sys.stderr)
     
     # Check if token is available
     token = os.getenv('GITHUB_TOKEN')
     
     # Debug output
+    print(f"\n🔑 Checking GITHUB_TOKEN environment variable...", file=sys.stderr)
+    if token:
+        print(f"   ✅ Token found: {token[:10]}... (length: {len(token)})", file=sys.stderr)
+    else:
+        print(f"   ❌ Token not found in environment", file=sys.stderr)
+    
     if env_loaded and not token:
         print(f"⚠️  Warning: .env file was loaded but GITHUB_TOKEN is empty", file=sys.stderr)
         print(f"    .env file location: {env_path}", file=sys.stderr)

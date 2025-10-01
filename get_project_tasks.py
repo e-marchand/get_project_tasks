@@ -10,7 +10,7 @@ This script uses GitHub's GraphQL API to fetch project data and can:
 
 Dependencies:
 - requests>=2.28.0
-- tabulate>=0.9.0
+- tabulate>=0.9.0 (optional, only required for table output format)
 
 Usage:
     python get_project_tasks.py --token <github_token> --org <organization> --project-id <project_id>
@@ -24,7 +24,14 @@ import os
 import sys
 from typing import Dict, List, Optional, Any
 import requests
-from tabulate import tabulate
+
+# Make tabulate optional - only required for table output format
+try:
+    from tabulate import tabulate
+    TABULATE_AVAILABLE = True
+except ImportError:
+    TABULATE_AVAILABLE = False
+    tabulate = None
 
 
 class GitHubProjectManager:
@@ -507,6 +514,13 @@ def display_as_relationship_tree(items: List[Dict], project_info: Dict, show_des
                 display_single_task(orphan_task, prefix="├── ", show_description=show_description)
 def display_as_table(items: List[Dict], project_info: Dict, show_description: bool = False):
     """Display items as a formatted table."""
+    if not TABULATE_AVAILABLE:
+        raise ImportError(
+            "The 'tabulate' package is required for table output format.\n"
+            "Install it with: pip install tabulate>=0.9.0\n"
+            "Or use a different output format: --output json, --output tree, or --output status-groups"
+        )
+    
     print(f"\n🎯 Project: {project_info['title']}")
     print(f"📄 Description: {project_info.get('shortDescription', 'N/A')}")
     print(f"🔗 URL: {project_info['url']}")
@@ -911,6 +925,7 @@ Examples:
 
 Environment variables:
   GITHUB_TOKEN    GitHub Personal Access Token (alternative to --token)
+  GITHUB_ORG      GitHub organization name (alternative to --org)
         """
     )
     
@@ -921,8 +936,7 @@ Environment variables:
     
     parser.add_argument(
         '--org',
-        required=True,
-        help='GitHub organization name (e.g., "4d")'
+        help='GitHub organization name (e.g., "4d") (can also use GITHUB_ORG env var)'
     )
     
     parser.add_argument(
@@ -993,15 +1007,21 @@ Environment variables:
         print("The token needs 'repo' and 'project' permissions.")
         sys.exit(1)
     
+    # Get organization from argument or environment variable
+    org = args.org or os.getenv('GITHUB_ORG')
+    if not org:
+        print("Error: GitHub organization is required. Provide it via --org argument or GITHUB_ORG environment variable.")
+        sys.exit(1)
+    
     try:
         # Initialize manager
         manager = GitHubProjectManager(token)
         
         if not args.quiet:
-            print(f"🔍 Fetching project {args.project_id} from organization {args.org}...")
+            print(f"🔍 Fetching project {args.project_id} from organization {org}...")
         
         # Get project information
-        project_info = manager.get_project_by_number(args.org, args.project_id)
+        project_info = manager.get_project_by_number(org, args.project_id)
         
         if not args.quiet:
             print(f"📋 Found project: {project_info['title']}")

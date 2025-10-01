@@ -6,7 +6,8 @@
         "${workspaceFolder}/mcp/mcp_server.py"
       ],
       "env": {
-        "GITHUB_TOKEN": "${env:GITHUB_TOKEN}"
+        "GITHUB_TOKEN": "${env:GITHUB_TOKEN}",
+        "GITHUB_ORG": "${env:GITHUB_ORG}"
       }
     }
   }

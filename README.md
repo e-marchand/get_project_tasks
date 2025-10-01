@@ -32,13 +32,17 @@ cd get_project_tasks
 
 2. Install required dependencies:
 ```bash
-pip install requests tabulate
+pip install requests
+# Optional: install tabulate for table output format
+pip install tabulate
 ```
 
 Or using a requirements file:
 ```bash
 pip install -r requirements.txt
 ```
+
+**Note:** The `tabulate` package is optional and only required if you want to use the table output format (`--output table`). Other output formats (json, tree, status-groups) work without it.
 
 3. Set up your GitHub token (see [GitHub Token Setup](#github-token-setup) below):
 ```bash
