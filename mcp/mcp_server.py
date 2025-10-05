@@ -300,6 +300,183 @@ class GitHubProjectMCPServer:
             },
             'task': task
         }
+    
+    def create_test_case_task(
+        self,
+        org: str = None,
+        project_id: int = None,
+        parent_task_number: int = None,
+        parent_task_id: str = None,
+        title: str = None,
+        description: str = None,
+        test_steps: str = None,
+        expected_result: str = None,
+        assignees: List[str] = None,
+        labels: List[str] = None,
+        status: str = None,
+        test_type: str = None,
+        platforms: str = None,
+        test_database: str = None,
+        test_id: str = None
+    ) -> Dict[str, Any]:
+        """
+        Create a test case task under a parent requirement.
+        
+        Args:
+            org: GitHub organization name (uses GITHUB_ORG env var if not provided)
+            project_id: GitHub project number
+            parent_task_number: Parent requirement issue number
+            parent_task_id: Parent requirement issue ID (alternative to parent_task_number)
+            title: Test case title
+            description: Test case description
+            test_steps: Test steps (will be included in the body)
+            expected_result: Expected result (will be included in the body)
+            assignees: List of assignee usernames
+            labels: List of label names (e.g., ["test case"])
+            status: Status field value (e.g., "To do", "In progress")
+            test_type: Test type custom field value (e.g., "Unit Test")
+            platforms: Platforms of test custom field value
+            test_database: Test database custom field value
+            test_id: Test ID custom field value
+        
+        Returns:
+            Dictionary containing created test case information
+        """
+        if not self.manager:
+            self.initialize()
+        
+        # Get organization from argument or environment variable
+        org = org or os.getenv('GITHUB_ORG')
+        if not org:
+            raise ValueError("GitHub organization is required. Provide 'org' parameter or set GITHUB_ORG environment variable.")
+        
+        if not project_id:
+            raise ValueError("project_id is required.")
+        
+        if not parent_task_number and not parent_task_id:
+            raise ValueError("Either parent_task_number or parent_task_id must be provided")
+        
+        if not title:
+            raise ValueError("title is required.")
+        
+        # Get project information
+        project_info = self.manager.get_project_by_number(org, project_id)
+        
+        # Get all project items to find parent task and repository info
+        items = self.manager.get_all_project_items(project_info['id'])
+        parsed_items = [self.manager.parse_item_data(item) for item in items]
+        
+        # Find the parent task
+        parent_task = None
+        if parent_task_number:
+            parent_task = next((item for item in parsed_items if item.get('number') == parent_task_number), None)
+        elif parent_task_id:
+            parent_task = next((item for item in parsed_items if item['id'] == parent_task_id), None)
+        
+        if not parent_task:
+            raise ValueError(f"Parent task not found in project (task_id={parent_task_id}, task_number={parent_task_number})")
+        
+        # Extract repository information from parent task
+        if not parent_task.get('repository'):
+            raise ValueError("Parent task must be an issue in a repository (not a draft issue)")
+        
+        repo_parts = parent_task['repository'].split('/')
+        if len(repo_parts) != 2:
+            raise ValueError(f"Invalid repository format: {parent_task['repository']}")
+        
+        owner, repo = repo_parts
+        
+        # Build test case body
+        body_parts = []
+        
+        if description:
+            body_parts.append(description)
+            body_parts.append("")
+        
+        body_parts.append("### Test case Steps")
+        body_parts.append("")
+        
+        if test_steps:
+            body_parts.append("#### Test steps :")
+            body_parts.append("")
+            body_parts.append(test_steps)
+            body_parts.append("")
+        
+        if expected_result:
+            body_parts.append("**Expected result:**")
+            body_parts.append("")
+            body_parts.append(expected_result)
+        
+        body = "\n".join(body_parts)
+        
+        # Get assignee IDs if provided
+        assignee_ids = []
+        if assignees:
+            for username in assignees:
+                user_id = self.manager.get_user_id(username)
+                if user_id:
+                    assignee_ids.append(user_id)
+        
+        # Get label IDs if provided
+        label_ids = []
+        if labels:
+            label_ids = self.manager.get_label_ids(owner, repo, labels)
+        
+        # Create the issue
+        issue = self.manager.create_issue(
+            owner=owner,
+            repo=repo,
+            title=title,
+            body=body,
+            assignee_ids=assignee_ids if assignee_ids else None,
+            label_ids=label_ids if label_ids else None,
+            parent_issue_id=parent_task['id']
+        )
+        
+        # Add issue to project
+        project_item = self.manager.add_issue_to_project(project_info['id'], issue['id'])
+        
+        # Update custom project fields
+        custom_fields = {}
+        if status:
+            custom_fields['Status'] = status
+        if test_type:
+            custom_fields['Test type'] = test_type
+        if platforms:
+            custom_fields['Plateforms of Test'] = platforms
+        if test_database:
+            custom_fields['Test database'] = test_database
+        if test_id:
+            custom_fields['Test ID'] = test_id
+        
+        for field_name, field_value in custom_fields.items():
+            field_id = self.manager.get_field_id_by_name(project_info['id'], field_name)
+            if field_id:
+                self.manager.update_project_field(
+                    project_id=project_info['id'],
+                    item_id=project_item['id'],
+                    field_id=field_id,
+                    value={'text': field_value}
+                )
+        
+        return {
+            'success': True,
+            'issue': {
+                'id': issue['id'],
+                'number': issue['number'],
+                'title': issue['title'],
+                'url': issue['url'],
+                'state': issue['state'],
+                'body': issue['body']
+            },
+            'parent_task': {
+                'id': parent_task['id'],
+                'number': parent_task['number'],
+                'title': parent_task['title']
+            },
+            'project_item_id': project_item['id'],
+            'custom_fields_set': list(custom_fields.keys())
+        }
 
 
 def create_mcp_server():
@@ -310,8 +487,8 @@ def create_mcp_server():
     # MCP Server metadata
     server_info = {
         "name": "github-project-tasks",
-        "version": "1.0.0",
-        "description": "MCP server for querying GitHub Projects with filtering capabilities"
+        "version": "1.1.0",
+        "description": "MCP server for querying and managing GitHub Projects with filtering capabilities"
     }
     
     # Tool definitions following MCP specification
@@ -414,6 +591,82 @@ def create_mcp_server():
                 },
                 "required": ["project_id"]
             }
+        },
+        {
+            "name": "create_test_case_task",
+            "description": "Create a test case task under a parent requirement in a GitHub project. This creates a new issue linked as a sub-issue to the parent requirement, adds it to the project, and sets custom fields like test type, platforms, test database, and test ID.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "org": {
+                        "type": "string",
+                        "description": "GitHub organization name (e.g., '4d'). If not provided, uses GITHUB_ORG environment variable."
+                    },
+                    "project_id": {
+                        "type": "integer",
+                        "description": "GitHub project number (e.g., 745 from the project URL)"
+                    },
+                    "parent_task_number": {
+                        "type": "integer",
+                        "description": "Parent requirement issue number (optional, either this or parent_task_id is required)"
+                    },
+                    "parent_task_id": {
+                        "type": "string",
+                        "description": "Parent requirement issue ID (optional, either this or parent_task_number is required)"
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Test case title (required)"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Test case description (optional)"
+                    },
+                    "test_steps": {
+                        "type": "string",
+                        "description": "Test steps to perform (optional, will be formatted in the issue body)"
+                    },
+                    "expected_result": {
+                        "type": "string",
+                        "description": "Expected result of the test (optional, will be formatted in the issue body)"
+                    },
+                    "assignees": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "List of assignee usernames (optional)"
+                    },
+                    "labels": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "List of label names (e.g., ['test case']) (optional)"
+                    },
+                    "status": {
+                        "type": "string",
+                        "description": "Status field value (e.g., 'To do', 'In progress') (optional)"
+                    },
+                    "test_type": {
+                        "type": "string",
+                        "description": "Test type custom field value (e.g., 'Unit Test', 'Integration Test') (optional)"
+                    },
+                    "platforms": {
+                        "type": "string",
+                        "description": "Platforms of test custom field value (e.g., 'macOS & Win & QodlyServer') (optional)"
+                    },
+                    "test_database": {
+                        "type": "string",
+                        "description": "Test database custom field value (e.g., '4DAIKitTest') (optional)"
+                    },
+                    "test_id": {
+                        "type": "string",
+                        "description": "Test ID custom field value (e.g., 'test_openai_chat_tools') (optional)"
+                    }
+                },
+                "required": ["project_id", "title"]
+            }
         }
     ]
     
@@ -429,6 +682,8 @@ def handle_tool_call(server: GitHubProjectMCPServer, tool_name: str, arguments: 
             result = server.get_child_tasks(**arguments)
         elif tool_name == "get_task_info":
             result = server.get_task_info(**arguments)
+        elif tool_name == "create_test_case_task":
+            result = server.create_test_case_task(**arguments)
         else:
             return {
                 "error": f"Unknown tool: {tool_name}",

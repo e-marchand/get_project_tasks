@@ -475,6 +475,244 @@ class GitHubProjectManager:
                 parsed['project_fields'][field_name] = field_value['title']
         
         return parsed
+    
+    def get_repository_id(self, owner: str, repo: str) -> str:
+        """Get the GitHub repository ID."""
+        query = """
+        query GetRepositoryId($owner: String!, $repo: String!) {
+            repository(owner: $owner, name: $repo) {
+                id
+            }
+        }
+        """
+        variables = {'owner': owner, 'repo': repo}
+        result = self.execute_graphql_query(query, variables)
+        return result['repository']['id']
+    
+    def create_issue(
+        self,
+        owner: str,
+        repo: str,
+        title: str,
+        body: str = None,
+        assignee_ids: List[str] = None,
+        label_ids: List[str] = None,
+        parent_issue_id: str = None
+    ) -> Dict:
+        """
+        Create a new issue in a repository.
+        
+        Args:
+            owner: Repository owner
+            repo: Repository name
+            title: Issue title
+            body: Issue body/description
+            assignee_ids: List of user node IDs to assign
+            label_ids: List of label node IDs to apply
+            parent_issue_id: Parent issue node ID (to create sub-issue relationship)
+        
+        Returns:
+            Created issue data
+        """
+        repo_id = self.get_repository_id(owner, repo)
+        
+        mutation = """
+        mutation CreateIssue($input: CreateIssueInput!) {
+            createIssue(input: $input) {
+                issue {
+                    id
+                    number
+                    title
+                    url
+                    body
+                    state
+                    author {
+                        login
+                    }
+                    assignees(first: 10) {
+                        nodes {
+                            login
+                        }
+                    }
+                    labels(first: 10) {
+                        nodes {
+                            name
+                        }
+                    }
+                }
+            }
+        }
+        """
+        
+        input_data = {
+            'repositoryId': repo_id,
+            'title': title
+        }
+        
+        if body:
+            input_data['body'] = body
+        if assignee_ids:
+            input_data['assigneeIds'] = assignee_ids
+        if label_ids:
+            input_data['labelIds'] = label_ids
+        
+        variables = {'input': input_data}
+        result = self.execute_graphql_query(mutation, variables)
+        issue = result['createIssue']['issue']
+        
+        # If parent issue is specified, create sub-issue relationship
+        if parent_issue_id:
+            self.link_as_sub_issue(parent_issue_id, issue['id'])
+        
+        return issue
+    
+    def link_as_sub_issue(self, parent_issue_id: str, child_issue_id: str):
+        """Link an issue as a sub-issue of a parent issue."""
+        mutation = """
+        mutation LinkSubIssue($input: AddSubIssueInput!) {
+            addSubIssue(input: $input) {
+                subIssue {
+                    id
+                }
+            }
+        }
+        """
+        
+        variables = {
+            'input': {
+                'issueId': parent_issue_id,
+                'subIssueId': child_issue_id
+            }
+        }
+        
+        return self.execute_graphql_query(mutation, variables)
+    
+    def add_issue_to_project(self, project_id: str, issue_id: str) -> Dict:
+        """Add an issue to a project."""
+        mutation = """
+        mutation AddProjectV2Item($input: AddProjectV2ItemByIdInput!) {
+            addProjectV2ItemById(input: $input) {
+                item {
+                    id
+                }
+            }
+        }
+        """
+        
+        variables = {
+            'input': {
+                'projectId': project_id,
+                'contentId': issue_id
+            }
+        }
+        
+        result = self.execute_graphql_query(mutation, variables)
+        return result['addProjectV2ItemById']['item']
+    
+    def update_project_field(
+        self,
+        project_id: str,
+        item_id: str,
+        field_id: str,
+        value: Any
+    ):
+        """Update a project field value."""
+        mutation = """
+        mutation UpdateProjectV2ItemFieldValue($input: UpdateProjectV2ItemFieldValueInput!) {
+            updateProjectV2ItemFieldValue(input: $input) {
+                projectV2Item {
+                    id
+                }
+            }
+        }
+        """
+        
+        variables = {
+            'input': {
+                'projectId': project_id,
+                'itemId': item_id,
+                'fieldId': field_id,
+                'value': value
+            }
+        }
+        
+        return self.execute_graphql_query(mutation, variables)
+    
+    def get_field_id_by_name(self, project_id: str, field_name: str) -> Optional[str]:
+        """Get project field ID by field name."""
+        query = """
+        query GetProjectFields($projectId: ID!) {
+            node(id: $projectId) {
+                ... on ProjectV2 {
+                    fields(first: 50) {
+                        nodes {
+                            ... on ProjectV2Field {
+                                id
+                                name
+                            }
+                            ... on ProjectV2SingleSelectField {
+                                id
+                                name
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        """
+        
+        variables = {'projectId': project_id}
+        result = self.execute_graphql_query(query, variables)
+        
+        fields = result.get('node', {}).get('fields', {}).get('nodes', [])
+        for field in fields:
+            if field.get('name') == field_name:
+                return field['id']
+        
+        return None
+    
+    def get_user_id(self, username: str) -> Optional[str]:
+        """Get GitHub user node ID by username."""
+        query = """
+        query GetUserId($username: String!) {
+            user(login: $username) {
+                id
+            }
+        }
+        """
+        
+        variables = {'username': username}
+        result = self.execute_graphql_query(query, variables)
+        return result.get('user', {}).get('id')
+    
+    def get_label_ids(self, owner: str, repo: str, label_names: List[str]) -> List[str]:
+        """Get label node IDs by names."""
+        query = """
+        query GetLabels($owner: String!, $repo: String!) {
+            repository(owner: $owner, name: $repo) {
+                labels(first: 100) {
+                    nodes {
+                        id
+                        name
+                    }
+                }
+            }
+        }
+        """
+        
+        variables = {'owner': owner, 'repo': repo}
+        result = self.execute_graphql_query(query, variables)
+        
+        labels = result.get('repository', {}).get('labels', {}).get('nodes', [])
+        label_ids = []
+        
+        for label_name in label_names:
+            for label in labels:
+                if label['name'].lower() == label_name.lower():
+                    label_ids.append(label['id'])
+                    break
+        
+        return label_ids
 
 
 def display_as_relationship_tree(items: List[Dict], project_info: Dict, show_description: bool = False):
